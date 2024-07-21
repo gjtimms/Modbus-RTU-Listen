@@ -1,0 +1,173 @@
+# This code passively listens to the continuous Modbus traffic between a Growatt 3000
+# inverter and its Chint DDSU666 power meter. The aim is to get almost realtime data
+# into HA to be used in automations to optimize the use of power in a battery-less
+# solar system. The data is sent from the esp32 device
+# to Home Assistant via HA's API, updating once per second, and MQTT is not required!
+# The data is read as strings of hex bytes, and converted into single precision float values
+# by the float_from_8hex () c++ function in the include file, then passed by global variables
+# into template sensors, so becoming entities that are available and up-to-date in HA itself.
+# Other data values for frequency, power factor, reactive power and grid frequency
+# (boring!, always >4.9 and <50.1 in Europe) could be easily added by adapting the code
+# which I've tried to keep as short as possible.
+# 
+# The other sensor is just an ads1115 analogue to digital converter that gives an overall voltage 
+# value from an an array of 8 miniature 0.5 volt, 80 ma solar panels connected in series into a
+# load resistor to give a max output of 4 volts, 80ma into a load resistor.  The mini panels are
+# scattered among the big panels to allow for partial shading, and the voltage across the load 
+# resistor, once calibrated, should give an estimate of the power the big panels could produce 
+# at any moment if the inverter isn't throttling the output because it is has nowhere to send it.
+# Lines 59-68 and 71-77 marked with ***s can be deleted if only the power meter data is wanted.
+#
+# To use the code:
+# 1) Copy the code from the Float-from-8hex.h file and paste it into a file you create
+#    with that name in your ESPHome directory.
+# 2) Paste the yaml code here into your esp32 device's yaml code in ESPHome and install.
+esphome:
+  name: esphome-web-8d9860
+  friendly_name: Power Meter
+  includes:
+    - Float-from-8hex.h
+   
+esp32:
+  board: az-delivery-devkit-v4 #esp32dev #esp32dev   az-delivery-devkit-v2
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  baud_rate: 115200
+  level: debug          # Required because the debug log is used to get the data
+
+globals:
+  - id: voltage
+    type: float
+    restore_value: no
+    initial_value: '0'
+  - id: current
+    type: float
+    restore_value: no
+    initial_value: '0'
+  - id: power
+    type: float
+    restore_value: no
+    initial_value: '0'
+  - id: total_energy
+    type: float
+    restore_value: no
+    initial_value: '0'
+
+# Set up i2c bus for ESP32 for input from ads1115 ***
+i2c:                   # ***
+  sda: 21              # *** the ads1115 connects to GPIO 21 and 22 on ESP32 and reads the voltage
+  scl: 22              # *** of the mini solar panel array for use as an analogue of the power the
+  scan: True           # *** inverter could be producing if the inverter could send it somewhere
+
+ads1115:                                  # ***
+  address: 0x48                           # ***
+  continuous_mode: on                     # ***
+  id: ads1115_48                          # ***
+
+sensor:
+  - platform: ads1115                     # ***
+    name: "Mini Solar Panel Voltage"      # *** Reads voltage from mini solar panel array  
+    id: ads1115_a0                        # ***
+    ads1115_id: ads1115_48                # ***
+    multiplexer: 'A0_GND'                 # ***
+    gain: 6.144                           # *** This gain is arbitrary as the sensor needs calibration
+    update_interval: 1s                   # ***
+  - platform: template          # The template sensor seems to be the only sensor that can get values from
+    name: "Chint Voltage"       # lambda code via global variables and also provide an entity to use in HA
+    lambda: |-
+      return id(voltage);
+    unit_of_measurement: Volts
+    accuracy_decimals: 1     
+    update_interval: 1s 
+  - platform: template
+    name: "Chint Current"
+    lambda: |-
+      return id(current);
+    unit_of_measurement: Amps
+    accuracy_decimals: 2       
+    update_interval: 1s
+  - platform: template
+    name: "Chint Power"
+    lambda: |-
+      return id(power);
+    unit_of_measurement: kw
+    accuracy_decimals: 3        
+    update_interval: 1s    
+  - platform: template
+    name: "Chint Total Energy"
+    lambda: |-
+      return id(total_energy);
+    unit_of_measurement: kwh
+    accuracy_decimals: 1        
+    update_interval: 1s
+  
+uart:
+  - id: uart_power_meter            # Listening to Modbus from Chint power meter
+    tx_pin: GPIO17 
+    rx_pin: GPIO16
+    baud_rate: 9600
+
+    debug:
+      direction: RX
+      dummy_receiver: true
+      after:                  # The timeout recognizes the end of string that lacks a normal terminator
+        timeout: 3ms          # It detects the standard modbus 3.5 char interval flaging the end of a message 
+      sequence:
+      - lambda: |-
+          uint8_t ptr;
+          int ints_4[4];
+          UARTDebug::log_hex(direction, bytes, ',');         // Log the message in hex with ',' separator
+          if (bytes.size() == 37)                            // Read data from 37 byte std::vector< uint8_t > bytes
+              {                                              // which is the 2000H register of the Chint DDSU666
+                  ptr = 3;                                   // Point to voltage data
+                  for (int z = 0; z < 4 ; z++) {             // Copy 4 bytes from vector array to int array
+                    ints_4[z] = bytes[ptr+z];
+                  }                    
+                  id(voltage) = float_from_8hex (ints_4);    // Decode the 4 byte single precision float
+                  //ESP_LOGD("custom", "Volts = %f", id(voltage)); // Log converted float value (optional).
+                  ptr = 7;                                   // Point to current data 
+                  for (int z = 0; z < 4 ; z++) {             // Copy 4 bytes from vector array to int array
+                    ints_4[z] = bytes[ptr+z];
+                  }                        
+                  id(current) = float_from_8hex (ints_4);    // Decode the 4 byte single precision float
+                  //ESP_LOGD("custom", "Current = %f", id(current)); // Log converted float value (optional).
+                  ptr = 11;                                  // Point to power data
+                  for (int z = 0; z < 4 ; z++) {             // Copy 4 bytes from vector array to int array
+                    ints_4[z] = bytes[ptr+z];
+                  }                    
+                  id(power) = float_from_8hex (ints_4);      // Decode the 4 byte single precision float                  
+                  //ESP_LOGD("custom", "Power = %f", id(power)); // Log converted float value (optional).
+              }                      
+          else if (bytes.size() == 29)                       // Read data from 37 byte message which has data
+              {                                              // from the 2000H register of the Chint DDSU666
+                  ptr = 3;                                   // Point to total incoming energy data
+                  for (int z = 0; z < 4 ; z++) {             // Copy 4 bytes from vector array to int array
+                    ints_4[z] = bytes[ptr+z];
+                  }                    
+                  id(total_energy) = float_from_8hex (ints_4);
+                  ESP_LOGD("custom", "Total Energy = %f", id(total_energy)); // Log converted float value (optional).                  
+              }
+
+# Enable Home Assistant API
+api:
+  #encryption:
+  #  key: "+XgCz9WfLcTurZPPKvTtwHRVee3cOerq+fItkBtPfU0="
+
+ota:
+ - platform: esphome
+  
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Esphome-Web-8D9860"
+    password: "Ndn70a853UNe"
+
+captive_portal:
+
+web_server:
