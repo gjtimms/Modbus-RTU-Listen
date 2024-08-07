@@ -17,6 +17,19 @@ Put the Float-from-8hex.h file into your ESPHome directory and flash your esp32 
 Hardware required: ![Hardware for Modbus RTU Listen](https://github.com/user-attachments/assets/1309c0f7-3d30-482d-9756-e128a27ce672)
 Try swapping the Rx and Tx 
 
-The image shows hardware I used. The Modbus comms are read by ESP32 GPIO pins 16 and 17 after passing through a RS485 to TTL converter. There is no need for a load resistor if the esp32 is within a few metres of the inverter. For some reason I don't understand, perhaps to do with the differential nature of the signal with RS485 comms, I can only read data easily from the 
-Chint DDSU666 power meter at the inverter end of the cable, with the orange wire from A+ on the UART<>TTl converter piggy backing onto pin 5 of the Growatt inverter's syscom port, and the brown wire from B- onto pin 3. Pin 5 is one of the pair for the power meter signal, but pin 3 is one of the pair for the inverter's MinShineBus or Third party monitoring equipment, so this seems weird and I would welcome enlightenment. Anyway it works well for me and does not affect the continual comms requests and responses on the RS485 connection, it just passively listens.
+The image shows hardware I used. The Modbus comms are read by ESP32 GPIO pins 16 and 17 after passing through a RS485 to TTL converter. There is no need for a load resistor if the esp32 is within a few metres of the inverter. For some reason I did not understand, at first I could only read data easily from the Chint DDSU666 power meter at the inverter end of the cable, with the orange wire from A+ on the UART<>TTl converter piggy backing onto pin 5 of the Growatt inverter's syscom port, and the brown wire from B- onto pin 3. Pin 5 is one of the pair for the power meter signal, but pin 3 is one of the pair for the inverter's MinShineBus or Third party monitoring equipment, so this seemed weird, and after working well for a few days it started to give garbage readings, the 8 byte requests were being read correctly, but the 29 and 37 byte strings were getting garbled. The failure was induced by an excess Neutral to Ground voltage that tripped the inverter which has a limit of 30 volts -- I measured 30.6 volts. Because of its differential nature and lack of a common ground value, RS485 comms are susceptible to this and it blew my TTL to RS485 converter which no longer flashed its red light merrily. A replacement converter did flash its light, but the esp32 did not join in. It turned out that the installer had not connected the power meter with a single twisted pair but used a wire from each of two twisted pairs in the cable. When I corrected this, and connected to pins 5 and 6 on the inverter I got a much stronger and clearer square wave signal on my oscilloscope, and it has worked reliably since. This arrangement does not affect the continual comms requests and responses on the RS485 connection, it just passively listens. Here is a sample from the logs:
+
+[12:55:45][D][uart_debug:114]: <<< 03,03,20,00,00,10,4E,24
+[12:55:45][D][custom:100]: Bytes: 8
+[12:55:45][D][uart_debug:114]: <<< 03,03,20,43,66,CC,CD,3F,BD,91,68,BE,68,8C,E7,3E,7B,98,C8,3E,AB,6A,E8,BF,2D,D2,F2,00,00,00,00,42,48,33,33,58,94
+[12:55:45][D][custom:100]: Bytes: 37
+[12:55:45][D][sensor:094]: 'Chint Voltage': Sending state 230.80000 Volts with 1 decimals of accuracy
+[12:55:45][D][uart_debug:114]: <<< 03,03,40,00,00,0C,51,ED
+[12:55:45][D][custom:100]: Bytes: 8
+[12:55:46][D][sensor:094]: 'Chint Current': Sending state 1.48100 Amps with 2 decimals of accuracy
+[12:55:46][D][uart_debug:114]: <<< 03,03,18,44,4A,A5,1F,44,4A,A5,1F,00,00,00,00,00,00,00,00,00,00,00,00,43,E8,4C,CD,D0,1D
+[12:55:46][D][custom:100]: Bytes: 29
+[12:55:46][D][custom:129]: Total Energy = 810.580017
+[12:55:46][D][sensor:094]: 'Chint Power': Sending state -0.22710 kw with 3 decimals of accuracy
+[12:55:46][D][uart_debug:114]: <<< 03,03,20,00,00,10,4E,24
 
