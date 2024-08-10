@@ -12,7 +12,7 @@ float  float_from_8hex (int arr[])
   uint8_t 	ptr;						// Start output at lhs of string    
   uint8_t 	cnt;
   uint8_t   h12;
-  std::string	result = "00000000000000000000000000000000";
+  std::string	result = "00000000000000000000000000000000";  // 32 bit ascii string
   uint8_t sign;
   float answer;
   float mult;
@@ -62,11 +62,9 @@ float  float_from_8hex (int arr[])
     // ********** Set sign flag **********
     if (result[0] == '0') {
       sign = 0;
-      printf("+ve \n");
     }
     else {
       sign = 1;    
-      printf("-ve \n");
     }
     
     // ********* Cut out 8 bit exponent from 32 bit string **********
@@ -131,7 +129,7 @@ float  float_from_8hex (int arr[])
     // ********* Cut out 23 bit fraction from 32 bit string **********
     string fract = result.substr(9, 23);
      
-    // ********* construct answer ************
+    // ********* Construct answer ************
     answer = 1;
     float fraction = 0.5;
     for (ptr=0; ptr<23; ptr++)  {
